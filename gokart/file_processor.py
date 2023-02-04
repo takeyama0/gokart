@@ -9,9 +9,12 @@ import luigi.contrib.s3
 import luigi.format
 import numpy as np
 import pandas as pd
+import polars as pl
 import pandas.errors
 
 from gokart.object_storage import ObjectStorage
+from gokart.config import get_option
+
 
 logger = getLogger(__name__)
 
@@ -168,7 +171,7 @@ class JsonFileProcessor(FileProcessor):
 
     def dump(self, obj, file):
         assert isinstance(obj, pd.DataFrame) or isinstance(obj, pd.Series) or isinstance(obj, dict), \
-            f'requires pd.DataFrame or pd.Series or dict, but {type(obj)} is passed.'
+           f'requires pd.DataFrame or pd.Series or dict, but {type(obj)} is passed.'
         if isinstance(obj, dict):
             obj = pd.DataFrame.from_dict(obj)
         obj.to_json(file)
@@ -215,13 +218,19 @@ class ParquetFileProcessor(FileProcessor):
 
     def load(self, file):
         # MEMO: read_parquet only supports a filepath as string (not a file handle)
-        return pd.read_parquet(file.name)
+        if get_option("use_polars"):
+            return pl.read_parquet(file.name)
+        else:
+            return pd.read_parquet(file.name)
 
     def dump(self, obj, file):
-        assert isinstance(obj, (pd.DataFrame)), \
+        assert isinstance(obj, (pd.DataFrame, pl.internals.dataframe.frame.DataFrame)), \
             f'requires pd.DataFrame, but {type(obj)} is passed.'
         # MEMO: to_parquet only supports a filepath as string (not a file handle)
-        obj.to_parquet(file.name, index=False, compression=self._compression)
+        if isinstance(obj, pd.DataFrame):
+            obj.to_parquet(file.name, index=False, compression=self._compression)
+        else:
+            obj.write_parquet(file.name, compression=self._compression if self._compression is not None else 'zstd')
 
 
 class FeatherFileProcessor(FileProcessor):
